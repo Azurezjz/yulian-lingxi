@@ -7,7 +7,7 @@ import ToolLogPanel from '../components/workflow/ToolLogPanel';
 import ResultPanel from '../components/workflow/ResultPanel';
 import ToolStatusPanel from '../components/workflow/ToolStatusPanel';
 import type { Message, MockWorkflowState } from '../api/types';
-import { MockAgentService } from '../api/mockWorkflow';
+import { WorkflowService } from '../api/workflow';
 
 const MainLayout: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -37,20 +37,47 @@ const MainLayout: React.FC = () => {
     setActiveTab('overview');
     setWorkflowState(prev => ({ ...prev, status: 'running', steps: [], logs: [], result: null }));
 
-    await MockAgentService.runWorkflow(text, (updatedState) => {
-      setWorkflowState(prev => ({ ...prev, ...updatedState }));
-    });
+    try {
+      // 调用真实后端 API
+      const result = await WorkflowService.executeWorkflow(
+        text,
+        null,
+        (updatedState) => {
+          setWorkflowState(prev => ({ ...prev, ...updatedState }));
+        }
+      );
 
-    setMessages(prev => [...prev, {
-      id: (Date.now() + 1).toString(),
-      role: 'agent',
-      content: '任务已完成，请在右侧面板查看详细执行报告和结果。',
-      timestamp: new Date().toLocaleTimeString(),
-      relatedTool: 'Workflow Engine'
-    }]);
-    
-    setActiveTab('result');
-    setLoading(false);
+      // 更新消息
+      const agentMessage = result.status === 'success' 
+        ? '任务已完成，请在右侧面板查看详细执行报告和结果。'
+        : result.result?.summary || '任务执行失败，请查看错误信息。';
+      
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'agent',
+        content: agentMessage,
+        timestamp: new Date().toLocaleTimeString(),
+        relatedTool: 'Workflow Engine'
+      }]);
+      
+      // 确保有结果才切换到结果标签页
+      if (result.result) {
+        setActiveTab('result');
+      }
+    } catch (error) {
+      // 错误处理
+      console.error('工作流执行失败:', error);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: 'agent',
+        content: `执行失败：${error instanceof Error ? error.message : '未知错误'}`,
+        timestamp: new Date().toLocaleTimeString(),
+        relatedTool: 'Workflow Engine'
+      }]);
+      setWorkflowState(prev => ({ ...prev, status: 'failed' }));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
